@@ -31,6 +31,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <thread>
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <time.h>
+#include <fstream>
 
 #include "../file_utils.h"
 #include "../meta_data.h"
@@ -148,6 +154,28 @@ class CUDAModuleNode : public runtime::ModuleNode {
   std::mutex mutex_;
 };
 
+void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream) {
+    cudaStream_t stream[n_stream];
+    CUresult result;
+    for (int i = 0; i < n_stream; ++i) {
+	cudaStreamCreate(&stream[i]);
+    	CUfunction func = m_->GetFunc(device_id, "sleepKernel");
+	int *ptr_maxcore = &max_core;
+	result = cuLaunchKernel(func, 68, 1, 1, 1, 1, 1, 0, static_cast<CUstream>(stream[i]), (void**)&ptr_maxcore, nullptr);
+	if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
+		std::ostringstream os;
+		const char* msg;
+		cuGetErrorName(result, &msg);
+		os << "CUDALaunch Error: sleepKernel " << msg << "\n"
+			<< ")\n";
+		LOG(FATAL) << os.str();
+	}
+    }
+    for (int i = 0; i < n_stream; ++i) {
+	cudaStreamDestroy(stream[i]);
+    }
+}
+
 // a wrapped function class to get packed func.
 class CUDAWrappedFunc {
  public:
@@ -167,11 +195,36 @@ class CUDAWrappedFunc {
     if (fcache_[device_id] == nullptr) {
       fcache_[device_id] = m_->GetFunc(device_id, func_name_);
     }
-    CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
+    // CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
+    cudaStream_t strm_;
+    cudaStreamCreate(&strm_);
+    CUstream strm = static_cast<CUstream>(strm_);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
+
+    int max_sm = 31;
+    std::thread t(limitSM, m_, device_id, max_sm, 16);
+
+    sleep(5);
+    printf("wake up, start main task\n");
+
+    clock_t tic = clock();
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
-                                     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
+				     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
+    cuStreamSynchronize(strm);
+    clock_t toc = clock();
+    double s = (double)(toc - tic) / CLOCKS_PER_SEC;
+
+    std::ofstream outfile;
+    outfile.open("test.csv", std::ios_base::app);
+    outfile << max_sm << "," << 1000*s << ","
+         << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
+         << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
+         << std::endl;
+
+    // exit(0);
+    t.join();
+
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;
       cuGetErrorName(result, &msg);
@@ -189,6 +242,7 @@ class CUDAWrappedFunc {
       }
       LOG(FATAL) << os.str();
     }
+
   }
 
  private:
