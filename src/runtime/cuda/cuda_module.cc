@@ -175,6 +175,17 @@ void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream) {
 	cudaStreamDestroy(stream[i]);
     }
 }
+using std::string;
+
+string readFileIntoString(const string& path) {
+	std::ifstream input_file(path);
+	if (!input_file.is_open()) {
+		std::cerr << "Could not open the file - '"
+			<< path << "'\n";
+		exit(EXIT_FAILURE);
+	}
+	return string((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+}
 
 // a wrapped function class to get packed func.
 class CUDAWrappedFunc {
@@ -202,6 +213,11 @@ class CUDAWrappedFunc {
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
 
     int max_sm = 31;
+
+    std::istringstream is( readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt") );
+    is >> max_sm;
+
+
     std::thread t(limitSM, m_, device_id, max_sm, 16);
 
     sleep(5);
@@ -215,14 +231,27 @@ class CUDAWrappedFunc {
     clock_t toc = clock();
     double s = (double)(toc - tic) / CLOCKS_PER_SEC;
 
+    printf("end main task\n");
+
+
+    std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
+    int N, L, M;
+    is2 >> N >> L >> M;
+
+    char fname[100] = {0};
+    sprintf(fname, "%dx%dx%d.csv", N, L, M);
+    string fname_(fname);
+
     std::ofstream outfile;
-    outfile.open("test.csv", std::ios_base::app);
+    outfile.open(fname_, std::ios_base::app);
     outfile << max_sm << "," << 1000*s << ","
          << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
          << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
          << std::endl;
 
+
     // exit(0);
+    printf("wait thread join\n");
     t.join();
 
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
