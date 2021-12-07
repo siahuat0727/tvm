@@ -71,8 +71,25 @@ void CodeGenC::ReserveKeywordsAsUnique() {
   GetUniqueName("return");
 }
 
+#include <iostream>
+#include <fstream>
+
+using std::string;
+
+string readFileIntoString(const string& path) {
+	std::ifstream input_file(path);
+	if (!input_file.is_open()) {
+		std::cerr << "Could not open the file - '"
+			<< path << "'\n";
+		exit(EXIT_FAILURE);
+	}
+	return string((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+}
+
+
 void CodeGenC::AddFunction(const PrimFunc& f) {
   // clear previous generated state.
+  this->stream << readFileIntoString("/tvm/kernel.cu") << "\n";
   this->InitFuncState(f);
   // reserve keywords
   ReserveKeywordsAsUnique();
@@ -117,11 +134,13 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   stream << ") {\n";
   this->PreFunctionBody(f);
   int func_scope = this->BeginScope();
+  // this->stream << " printf(\"In main kernel! My SM ID is %d\\n\", __mysmid());;\n";
   this->PrintStmt(f->body);
   this->PrintFinalReturn();
   this->EndScope(func_scope);
   this->PrintIndent();
   this->stream << "}\n\n";
+  // this->stream << "extern \"C\" __global__ void helloKernel(int k) { printf(\"Hello! My SM ID is %d\\n\", __mysmid()); }\n";
 }
 
 void CodeGenC::PrintFuncPrefix() { stream << "void"; }
