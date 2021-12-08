@@ -86,10 +86,29 @@ string readFileIntoString(const string& path) {
 	return string((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
 }
 
+void writeStringIntoFile(const string& path, const string& str) {
+	std::ofstream out(path);
+	out << str;
+	out.close();
+}
+
+int compareStringWithFileContent(const string& path, const string& str) {
+	//  return 0 means equal
+	int res = readFileIntoString(path).compare(0, 2, str);
+	printf("compare string %s %s %d\n", readFileIntoString(path).c_str(), str.c_str(), res);
+	return res;
+}
+
 
 void CodeGenC::AddFunction(const PrimFunc& f) {
+  // define kernel function once
+  string comm_path("/tvm/disk_communicate.log");
+  if (compareStringWithFileContent(comm_path, "no") == 0) {
+  	this->stream << readFileIntoString("/tvm/kernel.cu") << "\n";
+	writeStringIntoFile(comm_path, "yes");
+  }
+
   // clear previous generated state.
-  this->stream << readFileIntoString("/tvm/kernel.cu") << "\n";
   this->InitFuncState(f);
   // reserve keywords
   ReserveKeywordsAsUnique();

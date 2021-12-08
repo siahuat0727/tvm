@@ -47,20 +47,31 @@
 namespace tvm {
 namespace runtime {
 
+class CUDAModuleNode;
+
+void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream);
+
 // Module to support thread-safe multi-GPU execution.
 // cuModule is a per-GPU module
 // The runtime will contain a per-device module table
 // The modules will be lazily loaded
 class CUDAModuleNode : public runtime::ModuleNode {
  public:
+  bool first_getfunc;
+  std::thread t;
   explicit CUDAModuleNode(std::string data, std::string fmt,
                           std::unordered_map<std::string, FunctionInfo> fmap,
                           std::string cuda_source)
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
+    printf("constructor module %p\n", this);
+    first_getfunc = true;
   }
   // destructor
   ~CUDAModuleNode() {
+    printf("destructor module %p\n", this);
+    t.join();
+    printf("destructor module join thread %p\n", this);
     for (size_t i = 0; i < module_.size(); ++i) {
       if (module_[i] != nullptr) {
         CUDA_CALL(cudaSetDevice(static_cast<int>(i)));
@@ -102,9 +113,21 @@ class CUDAModuleNode : public runtime::ModuleNode {
       return "";
     }
   }
+  
+  void launchLimitSM(int device_id, int max_sm) {
+     t = std::thread(limitSM, this, device_id, max_sm, 16);
+     sleep(5);
+     printf("wake up launch (expected some kernel wake up) %p\n", this);
+
+  }
 
   // get a CUfunction from primary context in device_id
   CUfunction GetFunc(int device_id, const std::string& func_name) {
+    printf("getfunc module %s %p %d\n", func_name.c_str(), this, device_id);
+    if (first_getfunc) {
+      first_getfunc = false;
+      printf("first get func %p\n", this);
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     // must recheck under the lock scope
     if (module_[device_id] == nullptr) {
@@ -175,6 +198,7 @@ void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream) {
 	cudaStreamDestroy(stream[i]);
     }
 }
+
 using std::string;
 
 string readFileIntoString(const string& path) {
@@ -190,9 +214,23 @@ string readFileIntoString(const string& path) {
 // a wrapped function class to get packed func.
 class CUDAWrappedFunc {
  public:
+  mutable bool first_operator;
+  static int is_first_operator_shared;
+  mutable int operator_count;
+  mutable bool is_unique_wrapper;
+  CUDAWrappedFunc() {
+    printf("construct wrap %p\n", this);
+    first_operator = true;
+  }
+  ~CUDAWrappedFunc() {
+    printf("destruct wrap %p\n", this);
+  }
   // initialize the CUDA function.
   void Init(CUDAModuleNode* m, ObjectPtr<Object> sptr, const std::string& func_name,
             size_t num_void_args, const std::vector<std::string>& launch_param_tags) {
+    printf("init wrap %p\n", this);
+    first_operator = true;
+    operator_count = 0;
     m_ = m;
     sptr_ = sptr;
     func_name_ = func_name;
@@ -202,27 +240,42 @@ class CUDAWrappedFunc {
   // invoke the function with void arguments
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
     int device_id;
+
+    if (first_operator) {
+        first_operator = false;
+	printf("first operator wrap %p\n", this);
+	if (is_first_operator_shared) {
+		is_first_operator_shared = false;
+		printf("first operator shared wrap %p\n", this);
+		is_unique_wrapper = true;
+	} else {
+		is_unique_wrapper = false;
+	}
+    }
+
+    operator_count++;
+    if (is_unique_wrapper && operator_count == 3) {
+		int max_sm = 4;
+		m_->launchLimitSM(device_id, max_sm);
+    }
+
+
     CUDA_CALL(cudaGetDevice(&device_id));
     if (fcache_[device_id] == nullptr) {
       fcache_[device_id] = m_->GetFunc(device_id, func_name_);
     }
+
+    // std::istringstream is( readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt") );
+    // is >> max_sm;
+    // sleep(5);
+
     // CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
     cudaStream_t strm_;
     cudaStreamCreate(&strm_);
     CUstream strm = static_cast<CUstream>(strm_);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
 
-    int max_sm = 31;
-
-    std::istringstream is( readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt") );
-    is >> max_sm;
-
-
-    std::thread t(limitSM, m_, device_id, max_sm, 16);
-
-    sleep(5);
-    printf("wake up, start main task\n");
-
+    printf("before main task %s\n", func_name_.c_str());
     clock_t tic = clock();
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
@@ -230,8 +283,9 @@ class CUDAWrappedFunc {
     cuStreamSynchronize(strm);
     clock_t toc = clock();
     double s = (double)(toc - tic) / CLOCKS_PER_SEC;
+    printf("after main task %s\n", func_name_.c_str());
 
-    printf("end main task\n");
+    // printf("end main task\n");
 
 
     std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
@@ -244,6 +298,7 @@ class CUDAWrappedFunc {
 
     std::ofstream outfile;
     outfile.open(fname_, std::ios_base::app);
+    int max_sm = 0;
     outfile << max_sm << "," << 1000*s << ","
          << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
          << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
@@ -251,8 +306,8 @@ class CUDAWrappedFunc {
 
 
     // exit(0);
-    printf("wait thread join\n");
-    t.join();
+    // printf("wait thread join\n");
+    // t.join();
 
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;
@@ -288,13 +343,17 @@ class CUDAWrappedFunc {
   LaunchParamConfig launch_param_config_;
 };
 
+int CUDAWrappedFunc::is_first_operator_shared = true;
+
 class CUDAPrepGlobalBarrier {
  public:
   CUDAPrepGlobalBarrier(CUDAModuleNode* m, ObjectPtr<Object> sptr) : m_(m), sptr_(sptr) {
+    printf("contruct barrier %p\n", this);
     std::fill(pcache_.begin(), pcache_.end(), 0);
   }
 
   void operator()(const TVMArgs& args, TVMRetValue* rv) const {
+    printf("operator barrier %p\n", this);
     int device_id;
     CUDA_CALL(cudaGetDevice(&device_id));
     if (pcache_[device_id] == 0) {

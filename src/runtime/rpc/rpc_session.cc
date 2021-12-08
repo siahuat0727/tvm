@@ -86,7 +86,9 @@ void RPCSession::AsyncStreamWait(Device dev, TVMStreamHandle stream,
   value.v_handle = nullptr;
 
   try {
+    printf("rpc session sync before\n");
     this->GetDeviceAPI(dev)->StreamSync(dev, stream);
+    printf("rpc session sync after\n");
     callback(RPCCode::kReturn, TVMArgs(&value, &tcode, 1));
   } catch (const std::exception& e) {
     this->SendException(callback, e.what());

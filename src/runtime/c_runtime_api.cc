@@ -561,7 +561,9 @@ int TVMSynchronize(int device_type, int device_id, TVMStreamHandle stream) {
   DLDevice dev;
   dev.device_type = static_cast<DLDeviceType>(device_type);
   dev.device_id = device_id;
+  printf("tvm sync before\n");
   DeviceAPIManager::Get(dev)->StreamSync(dev, stream);
+  printf("tvm sync after\n");
   API_END();
 }
 

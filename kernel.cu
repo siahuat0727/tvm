@@ -20,7 +20,7 @@ extern "C" static __device__ __inline__ uint __mysmid() {
 extern "C" __device__ void sleepForever()
 {
     // clock_value_t sleep_cycles = 800000000000LL;  // TODO can we sleep forever?
-    clock_value_t sleep_cycles = 50000000000LL;
+    clock_value_t sleep_cycles = 30000000000LL;
     clock_value_t start = clock64();
     clock_value_t cycles_elapsed;
     do {
