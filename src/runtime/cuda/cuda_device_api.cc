@@ -179,15 +179,14 @@ class CUDADeviceAPI final : public DeviceAPI {
       memcpy(to, from, size);
       return;
     }
+    printf("sync device api copy before (%p)\n", this);
 
     if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCUDA) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
       if (dev_from.device_id == dev_to.device_id) {
         GPUCopy(from, to, size, cudaMemcpyDeviceToDevice, cu_stream);
       } else {
-	printf("sync device api copy before (%p)\n", this);
         cudaMemcpyPeerAsync(to, dev_to.device_id, from, dev_from.device_id, size, cu_stream);
-	printf("sync device api copy after  (%p)\n", this);
       }
     } else if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCPU) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
@@ -198,6 +197,7 @@ class CUDADeviceAPI final : public DeviceAPI {
     } else {
       LOG(FATAL) << "expect copy from/to GPU or between GPU";
     }
+    printf("sync device api copy after  (%p)\n", this);
   }
 
  public:

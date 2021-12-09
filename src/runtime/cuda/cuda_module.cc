@@ -280,10 +280,15 @@ class CUDAWrappedFunc {
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
 				     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
+    printf("before sync %s\n", func_name_.c_str());
     cuStreamSynchronize(strm);
+    printf("after sync %s\n", func_name_.c_str());
     clock_t toc = clock();
     double s = (double)(toc - tic) / CLOCKS_PER_SEC;
     printf("after main task %s\n", func_name_.c_str());
+
+    std::cout << " grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
+         << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2) << std::endl;
 
     // printf("end main task\n");
 
