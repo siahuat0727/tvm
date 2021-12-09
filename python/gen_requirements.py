@@ -109,6 +109,7 @@ REQUIREMENTS_BY_PIECE: RequirementsByPieceType = [
             [
                 "future",  # Hidden dependency of torch.
                 "onnx",
+                "onnxoptimizer",
                 "onnxruntime",
                 "torch",
                 "torchvision",
@@ -146,6 +147,7 @@ REQUIREMENTS_BY_PIECE: RequirementsByPieceType = [
                 "ethos-u-vela",
                 "future",  # Hidden dependency of torch.
                 "onnx",
+                "onnxoptimizer",
                 "onnxruntime",
                 "paddlepaddle",
                 "tensorflow",
@@ -240,6 +242,7 @@ CONSTRAINTS = [
     ("matplotlib", None),
     ("numpy", None),
     ("onnx", None),
+    ("onnxoptimizer", None),
     ("onnxruntime", None),
     ("opencv-python", None),
     ("paddlepaddle", None),
@@ -252,7 +255,7 @@ CONSTRAINTS = [
     ("sphinx_autodoc_annotation", None),
     ("sphinx_gallery", None),
     ("sphinx_rtd_theme", None),
-    ("synr", "==0.5.0"),
+    ("synr", "==0.6.0"),
     ("tensorflow", None),
     ("tensorflow-estimator", None),
     ("tflite", None),

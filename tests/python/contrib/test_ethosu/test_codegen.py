@@ -196,6 +196,22 @@ def _compare_ethosu_with_reference(
 def _compare_tvm_with_tflite(
     tf_func, shapes, accel_type, ranges=None, output_tolerance=0, print_cmm=False
 ):
+    mod, tflite_graph = _get_tflite_graph(tf_func, shapes, ranges)
+
+    # Generate reference data
+    input_data, output_data = infra.generate_ref_data_tflite(tflite_graph)
+
+    _compare_ethosu_with_reference(
+        mod,
+        input_data,
+        output_data,
+        accel_type,
+        output_tolerance=output_tolerance,
+        print_cmm=print_cmm,
+    )
+
+
+def _get_tflite_graph(tf_func, shapes, ranges=None):
     tensor_specs = [tf.TensorSpec(shape, dtype=tf.float32) for shape in shapes]
     if not ranges:
         ranges = [(0, 1) for _ in shapes]
@@ -225,18 +241,7 @@ def _compare_tvm_with_tflite(
 
     relay_module, params = relay.frontend.from_tflite(tflite_model)
     mod = partition_for_ethosu(relay_module, params)
-
-    # Generate reference data
-    input_data, output_data = infra.generate_ref_data_tflite(tflite_graph)
-
-    _compare_ethosu_with_reference(
-        mod,
-        input_data,
-        output_data,
-        accel_type,
-        output_tolerance=output_tolerance,
-        print_cmm=print_cmm,
-    )
+    return mod, tflite_graph
 
 
 class EthosUAnnotator(ExprMutator):
@@ -515,8 +520,8 @@ def test_mean(accel_type, ifm_shape, axis, keep_dims, use_same_quantization):
 
 
 @pytest.mark.parametrize("accel_type", ACCEL_TYPES)
-def test_binary_add_from_constant_scalar(accel_type):
-    dtype = "uint8"
+@pytest.mark.parametrize("dtype", ["int8", "uint8"])
+def test_elementwise_add_from_constant_scalar(accel_type, dtype):
     ifm_shape = (1, 4, 4, 8)
 
     def create_relay_graph():
@@ -538,7 +543,11 @@ def test_binary_add_from_constant_scalar(accel_type):
     ethosu_mod = partition_for_ethosu(cpu_mod)
 
     # Generate reference data
-    input_data = {"input": np.random.randint(low=0, high=255, size=ifm_shape, dtype=dtype)}
+    input_data = {
+        "input": np.random.randint(
+            low=np.iinfo(dtype).min, high=np.iinfo(dtype).max, size=ifm_shape, dtype=dtype
+        ),
+    }
     output_data = generate_ref_data(cpu_mod, input_data)
 
     _compare_ethosu_with_reference(
@@ -743,40 +752,20 @@ def test_ethosu_unary_elementwise(
 
 
 def test_ethosu_section_name():
-    def create_graph_single(input_tensor_name, input_tensor_shape, input_tensor_dtype):
-        c1_params = relay_ir_builder.QnnConv2DParams(input_tensor_dtype)
-        c1_params.ifm.shape = input_tensor_shape
-        c1_params.kernel.shape = (3, 3, c1_params.ifm.shape[3], 32)
-        c1_params.kernel.sc = relay.const(np.random.rand(32) * 2, "float32")
-        c1_params.strides = (1, 1)
-        c1_params.pad = "VALID"
-        c1_params.update_output_qnn_params(
-            input_tensor_dtype, input_tensor_dtype, input_tensor_dtype
-        )
-        input0 = relay.var(input_tensor_name, shape=c1_params.ifm.shape, dtype=c1_params.ifm.dtype)
-        c1, new_params = relay_ir_builder.create_qnn_conv2d(c1_params, input0)
-        c1_params.ofm.shape = get_shape_expr(input0, c1)
+    @tf.function
+    def depthwise_conv2d(x):
+        weight_shape = [3, 3, 3, 1]
+        weight = tf.constant(np.random.uniform(size=weight_shape), dtype=tf.float32)
+        tf_strides = [1, 1, 1, 1]
+        op = tf.nn.depthwise_conv2d(x, weight, strides=tf_strides, padding="SAME", dilations=(2, 2))
+        return op
 
-        f = relay.Function([input0], c1)
-        mod = tvm.IRModule()
-        mod["main"] = f
-        return mod, [c1_params]
-
-    accel_type = "ethos-u55-256"
-    relay_module, _ = create_graph_single("input", (1, 300, 300, 3), "int8")
-    input_dtype = "int8"
-    mod = partition_for_ethosu(relay_module)
+    mod, tflite_graph = _get_tflite_graph(depthwise_conv2d, [(1, 55, 55, 3)])
 
     # Generate reference data
-    in_min, in_max = util.get_range_for_dtype_str(input_dtype)
-    input_data = {
-        "input": np.random.randint(in_min, high=in_max, size=(1, 300, 300, 3), dtype=input_dtype)
-    }
-    output_data = generate_ref_data(relay_module, input_data)
+    input_data, output_data = infra.generate_ref_data_tflite(tflite_graph)
 
-    compiled_models = infra.build_source(
-        mod, input_data, output_data, accel_type, output_tolerance=1
-    )
+    compiled_models = infra.build_source(mod, input_data, output_data)
 
     # Assumes only two runtime.Modules are created -- i.e. single offload module
     ethosu_module = compiled_models[0].executor_factory.lib.imported_modules[0].imported_modules[0]
@@ -826,66 +815,14 @@ def test_ethosu_clz(accel_type):
 
 @pytest.mark.parametrize("accel_type", ACCEL_TYPES)
 def test_tflite_tanh(accel_type):
-    dtype = "int8"
     ifm_shape = [1, 115, 32, 7]
 
-    def create_tflite_graph():
-        class Model(tf.Module):
-            @tf.function
-            def tanh_function(self, x):
-                op = tf.nn.tanh(x)
-                return op
+    @tf.function
+    def tanh_func(x):
+        op = tf.nn.tanh(x)
+        return op
 
-        model = Model()
-        concrete_func = model.tanh_function.get_concrete_function(
-            tf.TensorSpec(ifm_shape, dtype=tf.float32)
-        )
-
-        # Convert the model
-        def representative_dataset():
-            for _ in range(100):
-                data = np.random.rand(*tuple(ifm_shape))
-                yield [data.astype(np.float32)]
-
-        converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
-        converter.optimizations = [tf.lite.Optimize.DEFAULT]
-        converter.representative_dataset = representative_dataset
-        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
-        converter.inference_input_type = tf.int8
-        converter.inference_output_type = tf.int8
-        tflite_model = converter.convert()
-        return tflite_model
-
-    tflite_graph = create_tflite_graph()
-
-    tflite_model = tflite.Model.Model.GetRootAsModel(tflite_graph, 0)
-
-    relay_module, params = relay.frontend.from_tflite(
-        tflite_model,
-        shape_dict={"input": ifm_shape},
-        dtype_dict={"input": dtype},
-    )
-    mod = partition_for_ethosu(relay_module, params)
-
-    # Generate reference data
-    input_data, output_data = infra.generate_ref_data_tflite(tflite_graph)
-
-    compiled_models = infra.build_source(
-        mod,
-        input_data,
-        output_data,
-        accel_type,
-    )
-
-    # Assumes only two runtime.Modules are created -- i.e. single offload module
-    ethosu_module = compiled_models[0].executor_factory.lib.imported_modules[0].imported_modules[0]
-
-    # Verify generated C source
-    get_artifacts = tvm._ffi.get_global_func("runtime.module.ethos-u.get_artifacts")
-    compilation_artifacts = get_artifacts(ethosu_module)
-    cmms = bytes.fromhex(compilation_artifacts[0].command_stream)
-    infra.print_payload(cmms)
-    infra.verify_source(compiled_models, accel_type)
+    _compare_tvm_with_tflite(tanh_func, [ifm_shape], accel_type)
 
 
 @pytest.mark.parametrize("accel_type", ACCEL_TYPES)
@@ -905,6 +842,18 @@ def test_tflite_concat(shapes, axis, accel_type):
         return op
 
     _compare_tvm_with_tflite(concat_func, shapes, accel_type)
+
+
+@pytest.mark.parametrize("accel_type", ACCEL_TYPES)
+def test_tflite_sigmoid(accel_type):
+    ifm_shape = [1, 135, 41, 6]
+
+    @tf.function
+    def sigmoid_function(x):
+        op = tf.nn.sigmoid(x)
+        return op
+
+    _compare_tvm_with_tflite(sigmoid_function, [ifm_shape], accel_type)
 
 
 if __name__ == "__main__":
