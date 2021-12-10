@@ -54,7 +54,6 @@ class CUDADeviceAPI final : public DeviceAPI {
     printf("after set device %p\n", this);
   }
   void GetAttr(Device dev, DeviceAttrKind kind, TVMRetValue* rv) final {
-    printf("get attr\n");
     int value = 0;
     switch (kind) {
       case kExist:
@@ -236,7 +235,10 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) final {
-    CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(stream);
+
+    cudaStream_t strm_;
+    cudaStreamCreate(&strm_);
+    CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(strm_);
   }
 
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final {

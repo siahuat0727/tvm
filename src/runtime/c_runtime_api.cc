@@ -36,6 +36,9 @@
 #include <sstream>
 #include <string>
 
+#include <cuda.h>
+#include <cuda_runtime.h>
+
 #include "object_internal.h"
 #include "runtime_base.h"
 
@@ -553,7 +556,11 @@ int TVMSetStream(int device_type, int device_id, TVMStreamHandle stream) {
   DLDevice dev;
   dev.device_type = static_cast<DLDeviceType>(device_type);
   dev.device_id = device_id;
-  DeviceAPIManager::Get(dev)->SetStream(dev, stream);
+
+
+  cudaStream_t strm_;
+  cudaStreamCreate(&strm_);
+  DeviceAPIManager::Get(dev)->SetStream(dev, strm_);
   API_END();
 }
 

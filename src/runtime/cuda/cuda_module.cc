@@ -57,7 +57,6 @@ void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream);
 // The modules will be lazily loaded
 class CUDAModuleNode : public runtime::ModuleNode {
  public:
-  bool first_getfunc;
   std::thread t;
   explicit CUDAModuleNode(std::string data, std::string fmt,
                           std::unordered_map<std::string, FunctionInfo> fmap,
@@ -65,7 +64,6 @@ class CUDAModuleNode : public runtime::ModuleNode {
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
     printf("constructor module %p\n", this);
-    first_getfunc = true;
   }
   // destructor
   ~CUDAModuleNode() {
@@ -115,7 +113,7 @@ class CUDAModuleNode : public runtime::ModuleNode {
   }
   
   void launchLimitSM(int device_id, int max_sm) {
-     t = std::thread(limitSM, this, device_id, max_sm, 16);
+     t = std::thread(limitSM, this, device_id, max_sm, 1);
      sleep(5);
      printf("wake up launch (expected some kernel wake up) %p\n", this);
 
@@ -124,10 +122,6 @@ class CUDAModuleNode : public runtime::ModuleNode {
   // get a CUfunction from primary context in device_id
   CUfunction GetFunc(int device_id, const std::string& func_name) {
     printf("getfunc module %s %p %d\n", func_name.c_str(), this, device_id);
-    if (first_getfunc) {
-      first_getfunc = false;
-      printf("first get func %p\n", this);
-    }
     std::lock_guard<std::mutex> lock(mutex_);
     // must recheck under the lock scope
     if (module_[device_id] == nullptr) {
@@ -241,9 +235,16 @@ class CUDAWrappedFunc {
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
     int device_id;
 
+
+
+    CUDA_CALL(cudaGetDevice(&device_id));
+    if (fcache_[device_id] == nullptr) {
+      fcache_[device_id] = m_->GetFunc(device_id, func_name_);
+    }
+
     if (first_operator) {
         first_operator = false;
-	printf("first operator wrap %p\n", this);
+	printf("first operator wrap %s %p\n", func_name_.c_str(), this);
 	if (is_first_operator_shared) {
 		is_first_operator_shared = false;
 		printf("first operator shared wrap %p\n", this);
@@ -254,15 +255,9 @@ class CUDAWrappedFunc {
     }
 
     operator_count++;
-    if (is_unique_wrapper && operator_count == 3) {
+    if (is_unique_wrapper && operator_count == 1) {
 		int max_sm = 4;
 		m_->launchLimitSM(device_id, max_sm);
-    }
-
-
-    CUDA_CALL(cudaGetDevice(&device_id));
-    if (fcache_[device_id] == nullptr) {
-      fcache_[device_id] = m_->GetFunc(device_id, func_name_);
     }
 
     // std::istringstream is( readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt") );
