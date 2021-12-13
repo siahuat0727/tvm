@@ -153,7 +153,6 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   stream << ") {\n";
   this->PreFunctionBody(f);
   int func_scope = this->BeginScope();
-  // this->stream << " printf(\"In main kernel! My SM ID is %d\\n\", __mysmid());;\n";
   this->PrintStmt(f->body);
   this->PrintFinalReturn();
   this->EndScope(func_scope);

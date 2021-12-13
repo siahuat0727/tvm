@@ -63,13 +63,10 @@ class CUDAModuleNode : public runtime::ModuleNode {
                           std::string cuda_source)
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
-    printf("constructor module %p\n", this);
   }
   // destructor
   ~CUDAModuleNode() {
-    printf("destructor module %p\n", this);
     t.join();
-    printf("destructor module join thread %p\n", this);
     for (size_t i = 0; i < module_.size(); ++i) {
       if (module_[i] != nullptr) {
         CUDA_CALL(cudaSetDevice(static_cast<int>(i)));
@@ -113,7 +110,7 @@ class CUDAModuleNode : public runtime::ModuleNode {
   }
   
   void launchLimitSM(int device_id, int max_sm) {
-     t = std::thread(limitSM, this, device_id, max_sm, 1);
+     t = std::thread(limitSM, this, device_id, max_sm, 16);
      sleep(5);
      printf("wake up launch (expected some kernel wake up) %p\n", this);
 
@@ -121,7 +118,6 @@ class CUDAModuleNode : public runtime::ModuleNode {
 
   // get a CUfunction from primary context in device_id
   CUfunction GetFunc(int device_id, const std::string& func_name) {
-    printf("getfunc module %s %p %d\n", func_name.c_str(), this, device_id);
     std::lock_guard<std::mutex> lock(mutex_);
     // must recheck under the lock scope
     if (module_[device_id] == nullptr) {
@@ -213,16 +209,13 @@ class CUDAWrappedFunc {
   mutable int operator_count;
   mutable bool is_unique_wrapper;
   CUDAWrappedFunc() {
-    printf("construct wrap %p\n", this);
     first_operator = true;
   }
   ~CUDAWrappedFunc() {
-    printf("destruct wrap %p\n", this);
   }
   // initialize the CUDA function.
   void Init(CUDAModuleNode* m, ObjectPtr<Object> sptr, const std::string& func_name,
             size_t num_void_args, const std::vector<std::string>& launch_param_tags) {
-    printf("init wrap %p\n", this);
     first_operator = true;
     operator_count = 0;
     m_ = m;
@@ -244,10 +237,8 @@ class CUDAWrappedFunc {
 
     if (first_operator) {
         first_operator = false;
-	printf("first operator wrap %s %p\n", func_name_.c_str(), this);
 	if (is_first_operator_shared) {
 		is_first_operator_shared = false;
-		printf("first operator shared wrap %p\n", this);
 		is_unique_wrapper = true;
 	} else {
 		is_unique_wrapper = false;
@@ -270,20 +261,17 @@ class CUDAWrappedFunc {
     CUstream strm = static_cast<CUstream>(strm_);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
 
-    printf("before main task %s\n", func_name_.c_str());
     clock_t tic = clock();
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
 				     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
-    printf("before sync %s\n", func_name_.c_str());
     cuStreamSynchronize(strm);
-    printf("after sync %s\n", func_name_.c_str());
+    cudaStreamDestroy(strm_);
     clock_t toc = clock();
     double s = (double)(toc - tic) / CLOCKS_PER_SEC;
-    printf("after main task %s\n", func_name_.c_str());
 
-    std::cout << " grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
-         << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2) << std::endl;
+    // std::cout << " grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
+    //      << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2) << std::endl;
 
     // printf("end main task\n");
 
@@ -348,12 +336,10 @@ int CUDAWrappedFunc::is_first_operator_shared = true;
 class CUDAPrepGlobalBarrier {
  public:
   CUDAPrepGlobalBarrier(CUDAModuleNode* m, ObjectPtr<Object> sptr) : m_(m), sptr_(sptr) {
-    printf("contruct barrier %p\n", this);
     std::fill(pcache_.begin(), pcache_.end(), 0);
   }
 
   void operator()(const TVMArgs& args, TVMRetValue* rv) const {
-    printf("operator barrier %p\n", this);
     int device_id;
     CUDA_CALL(cudaGetDevice(&device_id));
     if (pcache_[device_id] == 0) {

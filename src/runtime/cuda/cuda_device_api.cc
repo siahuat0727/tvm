@@ -42,16 +42,12 @@ class CUDADeviceAPI final : public DeviceAPI {
  public:
   bool first_free;
   CUDADeviceAPI() {
-    printf("construct device api\n");
     first_free = true;
   }
   ~CUDADeviceAPI() {
-    printf("destruct device api\n");
   }
   void SetDevice(Device dev) final { 
-    printf("before set device %p\n", this);
     CUDA_CALL(cudaSetDevice(dev.device_id)); 
-    printf("after set device %p\n", this);
   }
   void GetAttr(Device dev, DeviceAttrKind kind, TVMRetValue* rv) final {
     int value = 0;
@@ -124,7 +120,6 @@ class CUDADeviceAPI final : public DeviceAPI {
     *rv = value;
   }
   void* AllocDataSpace(Device dev, size_t nbytes, size_t alignment, DLDataType type_hint) final {
-    printf("allocate\n");
     ICHECK_EQ(256 % alignment, 0U) << "CUDA space is aligned at 256 bytes";
     void* ret;
     if (dev.device_type == kDLCUDAHost) {
@@ -179,11 +174,9 @@ class CUDADeviceAPI final : public DeviceAPI {
       memcpy(to, from, size);
       return;
     }
-    printf("sync device api copy before (%p)\n", this);
 
     if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCUDA) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
-      printf("sync device api copy KDL cuda -> cuda (%p)\n", this);
       if (dev_from.device_id == dev_to.device_id) {
         GPUCopy(from, to, size, cudaMemcpyDeviceToDevice, cu_stream);
       } else {
@@ -191,18 +184,13 @@ class CUDADeviceAPI final : public DeviceAPI {
       }
     } else if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCPU) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
-      if (!cu_stream)
-	      printf("sync device api copy KDL cuda -> cuda (%p) stream is null\n", this);
-      printf("sync device api copy KDL cuda -> cpu (%p) stream=%p\n", this, cu_stream);
       GPUCopy(from, to, size, cudaMemcpyDeviceToHost, cu_stream);
     } else if (dev_from.device_type == kDLCPU && dev_to.device_type == kDLCUDA) {
       CUDA_CALL(cudaSetDevice(dev_to.device_id));
-      printf("sync device api copy KDL cpu -> cuda (%p)\n", this);
       GPUCopy(from, to, size, cudaMemcpyHostToDevice, cu_stream);
     } else {
       LOG(FATAL) << "expect copy from/to GPU or between GPU";
     }
-    printf("sync device api copy after  (%p)\n", this);
   }
 
  public:
@@ -220,7 +208,6 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void SyncStreamFromTo(Device dev, TVMStreamHandle event_src, TVMStreamHandle event_dst) {
-    printf("sync device api fromto before (%p)\n", this);
     CUDA_CALL(cudaSetDevice(dev.device_id));
     cudaStream_t src_stream = static_cast<cudaStream_t>(event_src);
     cudaStream_t dst_stream = static_cast<cudaStream_t>(event_dst);
@@ -229,15 +216,12 @@ class CUDADeviceAPI final : public DeviceAPI {
     CUDA_CALL(cudaEventRecord(evt, src_stream));
     CUDA_CALL(cudaStreamWaitEvent(dst_stream, evt, 0));
     CUDA_CALL(cudaEventDestroy(evt));
-    printf("sync device api fromto after  (%p)\n", this);
   }
 
   void StreamSync(Device dev, TVMStreamHandle stream) final {
-    printf("sync device api streamsync before (%p)\n", this);
-    std::cout << boost::stacktrace::stacktrace() << std::endl;
+    // std::cout << boost::stacktrace::stacktrace() << std::endl;
     CUDA_CALL(cudaSetDevice(dev.device_id));
     CUDA_CALL(cudaStreamSynchronize(static_cast<cudaStream_t>(stream)));
-    printf("sync device api streamsync after  (%p)\n", this);
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) final {
@@ -270,13 +254,9 @@ class CUDADeviceAPI final : public DeviceAPI {
 	cudaStreamCreate(&stream);
     }
     if (stream != nullptr) {
-	    printf("sync device api gpucopy before \n");
       CUDA_CALL(cudaMemcpyAsync(to, from, size, kind, stream));
-	    printf("sync device api gpucopy after  \n");
     } else {
-	    printf("sync device api gpucopy null before \n");
       CUDA_CALL(cudaMemcpy(to, from, size, kind));
-	    printf("sync device api gpucopy null after  \n");
     }
     if (stream_is_null) {
 	cudaStreamDestroy(stream);
@@ -307,11 +287,9 @@ class GPUTimerNode : public TimerNode {
   }
   virtual void Stop() { CUDA_CALL(cudaEventRecord(stop_, CUDAThreadEntry::ThreadLocal()->stream)); }
   virtual int64_t SyncAndGetElapsedNanos() {
-    printf("sync device api gpu timer null before \n");
     CUDA_CALL(cudaEventSynchronize(stop_));
     float milliseconds = 0;
     CUDA_CALL(cudaEventElapsedTime(&milliseconds, start_, stop_));
-    printf("sync device api gpu timer null after  \n");
     return milliseconds * 1e6;
   }
   virtual ~GPUTimerNode() {

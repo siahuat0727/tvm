@@ -374,12 +374,9 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
     // skip first time call, to activate lazy compilation components.
     pf.CallPacked(args, &temp);
 
-    printf("rpc sync before\n");
     // DeviceAPI::Get(dev)->StreamSync(dev, nullptr);
-    printf("rpc sync after\n");
 
     for (int i = 0; i < repeat; ++i) {
-      printf("rpc outer %d before\n", i);
       if (f_preproc != nullptr) {
         f_preproc.CallPacked(args, &temp);
       }
@@ -394,9 +391,7 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
         Timer t = Timer::Start(dev);
         // start timing
         for (int i = 0; i < number; ++i) {
-          printf("rpc inner %d before\n", i);
           pf.CallPacked(args, &temp);
-          printf("rpc inner %d after\n", i);
         }
         t->Stop();
         int64_t t_nanos = t->SyncAndGetElapsedNanos();
@@ -405,7 +400,6 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
 
       double speed = duration_ms / 1e3 / number;
       os.write(reinterpret_cast<char*>(&speed), sizeof(speed));
-      printf("rpc outer %d after\n", i);
     }
 
     std::string blob = os.str();
@@ -414,7 +408,6 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
     arr.data = blob.data();
     // return the time.
     *rv = arr;
-    printf("rpc sync exit\n");
   };
   return PackedFunc(ftimer);
 }
