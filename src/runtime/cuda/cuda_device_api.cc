@@ -155,6 +155,7 @@ class CUDADeviceAPI final : public DeviceAPI {
       VLOG(1) << "freeing device memory";
       CUDA_CALL(cudaFree(ptr));
     }
+    printf("exit free\n");
   }
 
  protected:
@@ -182,6 +183,7 @@ class CUDADeviceAPI final : public DeviceAPI {
 
     if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCUDA) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
+      printf("sync device api copy KDL cuda -> cuda (%p)\n", this);
       if (dev_from.device_id == dev_to.device_id) {
         GPUCopy(from, to, size, cudaMemcpyDeviceToDevice, cu_stream);
       } else {
@@ -189,9 +191,13 @@ class CUDADeviceAPI final : public DeviceAPI {
       }
     } else if (dev_from.device_type == kDLCUDA && dev_to.device_type == kDLCPU) {
       CUDA_CALL(cudaSetDevice(dev_from.device_id));
+      if (!cu_stream)
+	      printf("sync device api copy KDL cuda -> cuda (%p) stream is null\n", this);
+      printf("sync device api copy KDL cuda -> cpu (%p) stream=%p\n", this, cu_stream);
       GPUCopy(from, to, size, cudaMemcpyDeviceToHost, cu_stream);
     } else if (dev_from.device_type == kDLCPU && dev_to.device_type == kDLCUDA) {
       CUDA_CALL(cudaSetDevice(dev_to.device_id));
+      printf("sync device api copy KDL cpu -> cuda (%p)\n", this);
       GPUCopy(from, to, size, cudaMemcpyHostToDevice, cu_stream);
     } else {
       LOG(FATAL) << "expect copy from/to GPU or between GPU";
@@ -259,6 +265,10 @@ class CUDADeviceAPI final : public DeviceAPI {
  private:
   static void GPUCopy(const void* from, void* to, size_t size, cudaMemcpyKind kind,
                       cudaStream_t stream) {
+    bool stream_is_null = stream == nullptr;
+    if (stream_is_null) {
+	cudaStreamCreate(&stream);
+    }
     if (stream != nullptr) {
 	    printf("sync device api gpucopy before \n");
       CUDA_CALL(cudaMemcpyAsync(to, from, size, kind, stream));
@@ -267,6 +277,9 @@ class CUDADeviceAPI final : public DeviceAPI {
 	    printf("sync device api gpucopy null before \n");
       CUDA_CALL(cudaMemcpy(to, from, size, kind));
 	    printf("sync device api gpucopy null after  \n");
+    }
+    if (stream_is_null) {
+	cudaStreamDestroy(stream);
     }
   }
 };
