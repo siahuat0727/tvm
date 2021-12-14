@@ -58,15 +58,18 @@ void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream);
 class CUDAModuleNode : public runtime::ModuleNode {
  public:
   std::thread t;
+  cudaStream_t my_stream;
   explicit CUDAModuleNode(std::string data, std::string fmt,
                           std::unordered_map<std::string, FunctionInfo> fmap,
                           std::string cuda_source)
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
+    cudaStreamCreate(&my_stream);
   }
   // destructor
   ~CUDAModuleNode() {
     t.join();
+    cudaStreamDestroy(my_stream);
     for (size_t i = 0; i < module_.size(); ++i) {
       if (module_[i] != nullptr) {
         CUDA_CALL(cudaSetDevice(static_cast<int>(i)));
@@ -256,19 +259,19 @@ class CUDAWrappedFunc {
     // sleep(5);
 
     // CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
-    cudaStream_t strm_;
-    cudaStreamCreate(&strm_);
-    CUstream strm = static_cast<CUstream>(strm_);
+    // cudaStream_t strm_;
+    // cudaStreamCreate(&strm_);
+    // CUstream strm = static_cast<CUstream>(strm_);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
 
-    clock_t tic = clock();
+    // clock_t tic = clock();
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
-				     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
-    cuStreamSynchronize(strm);
-    cudaStreamDestroy(strm_);
-    clock_t toc = clock();
-    double s = (double)(toc - tic) / CLOCKS_PER_SEC;
+				     wl.block_dim(2), wl.dyn_shmem_size, m_->my_stream, void_args, nullptr);
+    cuStreamSynchronize(m_->my_stream);
+    // cudaStreamDestroy(strm_);
+    // clock_t toc = clock();
+    // double s = (double)(toc - tic) / CLOCKS_PER_SEC;
 
     // std::cout << " grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
     //      << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2) << std::endl;
@@ -276,21 +279,21 @@ class CUDAWrappedFunc {
     // printf("end main task\n");
 
 
-    std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
-    int N, L, M;
-    is2 >> N >> L >> M;
+    // std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
+    // int N, L, M;
+    // is2 >> N >> L >> M;
 
-    char fname[100] = {0};
-    sprintf(fname, "%dx%dx%d.csv", N, L, M);
-    string fname_(fname);
+    // char fname[100] = {0};
+    // sprintf(fname, "%dx%dx%d.csv", N, L, M);
+    // string fname_(fname);
 
-    std::ofstream outfile;
-    outfile.open(fname_, std::ios_base::app);
-    int max_sm = 0;
-    outfile << max_sm << "," << 1000*s << ","
-         << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
-         << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
-         << std::endl;
+    // std::ofstream outfile;
+    // outfile.open(fname_, std::ios_base::app);
+    // int max_sm = 0;
+    // outfile << max_sm << "," << 1000*s << ","
+    //      << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
+    //      << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
+    //      << std::endl;
 
 
     // exit(0);

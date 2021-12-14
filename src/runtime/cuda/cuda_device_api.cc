@@ -225,10 +225,7 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) final {
-
-    cudaStream_t strm_;
-    cudaStreamCreate(&strm_);
-    CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(strm_);
+    CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(stream);
   }
 
   void* AllocWorkspace(Device dev, size_t size, DLDataType type_hint) final {
@@ -252,6 +249,7 @@ class CUDADeviceAPI final : public DeviceAPI {
     bool stream_is_null = stream == nullptr;
     if (stream_is_null) {
 	cudaStreamCreate(&stream);
+	printf("GPU copy, create own stream\n");
     }
     if (stream != nullptr) {
       CUDA_CALL(cudaMemcpyAsync(to, from, size, kind, stream));

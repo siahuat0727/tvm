@@ -101,9 +101,7 @@ void LocalSession::CopyToRemote(void* from_bytes, DLTensor* to, uint64_t nbytes)
   this->GetDeviceAPI(dev_to)->CopyDataFromTo(&from, to, nullptr);
   // Copy can happen asynchrously
   // synchronize to make sure that copy is completed
-  printf("rpclocal sync copytoremote before\n");
   this->GetDeviceAPI(dev_to)->StreamSync(dev_to, nullptr);
-  printf("rpclocal sync copytoremote after\n");
 }
 
 void LocalSession::CopyFromRemote(DLTensor* from, void* to_bytes, uint64_t nbytes) {
@@ -121,9 +119,7 @@ void LocalSession::CopyFromRemote(DLTensor* from, void* to_bytes, uint64_t nbyte
   this->GetDeviceAPI(dev_from)->CopyDataFromTo(from, &to, nullptr);
   // Copy can happen asynchrously
   // synchronize to make sure that copy is completed
-  printf("rpclocal sync copyfromremote before\n");
   this->GetDeviceAPI(dev_from)->StreamSync(dev_from, nullptr);
-  printf("rpclocal sync copyfromremote after\n");
 }
 
 void LocalSession::FreeHandle(void* handle, int type_code) {

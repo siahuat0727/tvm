@@ -123,9 +123,7 @@ class RPCDeviceAPI final : public DeviceAPI {
 
   void StreamSync(Device dev, TVMStreamHandle stream) final {
     auto remote_dev = RemoveRPCSessionMask(dev);
-    printf("rpc device sync before\n");
     GetSess(dev)->GetDeviceAPI(remote_dev)->StreamSync(remote_dev, stream);
-    printf("rpc device sync after\n");
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) {
