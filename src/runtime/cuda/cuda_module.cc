@@ -247,12 +247,12 @@ class CUDAWrappedFunc {
 
     operator_count++;
     if (is_unique_wrapper && operator_count == 1) {
-		int max_sm = 4;
-		m_->launchLimitSM(device_id, max_sm);
+	    int max_sm = 0;
+	    std::istringstream is(readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt"));
+	    is >> max_sm;
+	    m_->launchLimitSM(device_id, max_sm);
     }
 
-    // std::istringstream is( readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt") );
-    // is >> max_sm;
     // sleep(5);
 
     // CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
