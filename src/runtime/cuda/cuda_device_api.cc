@@ -225,6 +225,8 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) final {
+    printf("cuda device api SetStream: never reach here?");
+    exit(1);
     CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(stream);
   }
 

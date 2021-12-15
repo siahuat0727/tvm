@@ -65,6 +65,7 @@ class CUDAModuleNode : public runtime::ModuleNode {
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
     cudaStreamCreate(&my_stream);
+    // CUDAThreadEntry::ThreadLocal()->stream = my_stream;
   }
   // destructor
   ~CUDAModuleNode() {
@@ -209,6 +210,8 @@ class CUDAWrappedFunc {
  public:
   mutable bool first_operator;
   static int is_first_operator_shared;
+  static int count;
+  mutable int id;
   mutable int operator_count;
   mutable bool is_unique_wrapper;
   CUDAWrappedFunc() {
@@ -239,6 +242,8 @@ class CUDAWrappedFunc {
     }
 
     if (first_operator) {
+	id = count;
+	count++;
         first_operator = false;
 	if (is_first_operator_shared) {
 		is_first_operator_shared = false;
@@ -268,7 +273,10 @@ class CUDAWrappedFunc {
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
 				     wl.block_dim(2), wl.dyn_shmem_size, m_->my_stream, void_args, nullptr);
-    cuStreamSynchronize(m_->my_stream);
+
+    if (id == count-1) {
+    	cuStreamSynchronize(m_->my_stream);
+    }
     // cudaStreamDestroy(strm_);
     // clock_t toc = clock();
     // double s = (double)(toc - tic) / CLOCKS_PER_SEC;
@@ -335,6 +343,7 @@ class CUDAWrappedFunc {
 };
 
 int CUDAWrappedFunc::is_first_operator_shared = true;
+int CUDAWrappedFunc::count = 0;
 
 class CUDAPrepGlobalBarrier {
  public:
