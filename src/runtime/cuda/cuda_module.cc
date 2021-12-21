@@ -65,10 +65,10 @@ class CUDAModuleNode : public runtime::ModuleNode {
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
     cudaStreamCreate(&my_stream);
-    // CUDAThreadEntry::ThreadLocal()->stream = my_stream;
   }
   // destructor
   ~CUDAModuleNode() {
+    // TODO check whether can spin forever and force kill the thread here?
     t.join();
     cudaStreamDestroy(my_stream);
     for (size_t i = 0; i < module_.size(); ++i) {
@@ -115,7 +115,7 @@ class CUDAModuleNode : public runtime::ModuleNode {
   
   void launchLimitSM(int device_id, int max_sm) {
      t = std::thread(limitSM, this, device_id, max_sm, 16);
-     sleep(5);
+     sleep(4);
      printf("wake up launch (expected some kernel wake up) %p\n", this);
 
   }
@@ -234,8 +234,6 @@ class CUDAWrappedFunc {
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
     int device_id;
 
-
-
     CUDA_CALL(cudaGetDevice(&device_id));
     if (fcache_[device_id] == nullptr) {
       fcache_[device_id] = m_->GetFunc(device_id, func_name_);
@@ -261,12 +259,6 @@ class CUDAWrappedFunc {
 	    m_->launchLimitSM(device_id, max_sm);
     }
 
-    // sleep(5);
-
-    // CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
-    // cudaStream_t strm_;
-    // cudaStreamCreate(&strm_);
-    // CUstream strm = static_cast<CUstream>(strm_);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
 
     // clock_t tic = clock();
@@ -274,39 +266,24 @@ class CUDAWrappedFunc {
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
 				     wl.block_dim(2), wl.dyn_shmem_size, m_->my_stream, void_args, nullptr);
 
-    if (id == count-1) {
-    	cuStreamSynchronize(m_->my_stream);
-    }
     // cudaStreamDestroy(strm_);
     // clock_t toc = clock();
     // double s = (double)(toc - tic) / CLOCKS_PER_SEC;
-
-    // std::cout << " grid=(" << wl.grid_dim(0) << "," << wl.grid_dim(1) << "," << wl.grid_dim(2) << "), "
-    //      << " block=(" << wl.block_dim(0) << "," << wl.block_dim(1) << "," << wl.block_dim(2) << std::endl;
-
-    // printf("end main task\n");
-
 
     // std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
     // int N, L, M;
     // is2 >> N >> L >> M;
 
-    // char fname[100] = {0};
-    // sprintf(fname, "%dx%dx%d.csv", N, L, M);
-    // string fname_(fname);
+    std::ofstream outfile;
+    outfile.open("lstm_grid.txt", std::ios_base::app);
+    outfile << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
+         << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")" << "," 
+	 << func_name_ 
+         << std::endl;
 
-    // std::ofstream outfile;
-    // outfile.open(fname_, std::ios_base::app);
-    // int max_sm = 0;
-    // outfile << max_sm << "," << 1000*s << ","
-    //      << "grid=(" << wl.grid_dim(0) << "x" << wl.grid_dim(1) << "x" << wl.grid_dim(2) << ")" << ","
-    //      << "block=(" << wl.block_dim(0) << "x" << wl.block_dim(1) << "x" << wl.block_dim(2) << ")"
-    //      << std::endl;
-
-
-    // exit(0);
-    // printf("wait thread join\n");
-    // t.join();
+    if (id == count-1) {
+    	cuStreamSynchronize(m_->my_stream);
+    }
 
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;

@@ -33,7 +33,7 @@
 #include "cuda_common.h"
 
 #include <iostream>
-#include <boost/stacktrace.hpp>
+// #include <boost/stacktrace.hpp>
 
 namespace tvm {
 namespace runtime {
@@ -137,9 +137,8 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void FreeDataSpace(Device dev, void* ptr) final {
-    printf("free\n");
     if (first_free) {
-	    printf("first!\n");
+	    printf("first free (src/runtime/cuda/cuda_device_api.cc)\n");
 	    first_free = false;
     }
     if (dev.device_type == kDLCUDAHost) {

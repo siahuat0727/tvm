@@ -94,15 +94,15 @@ void writeStringIntoFile(const string& path, const string& str) {
 
 int compareStringWithFileContent(const string& path, const string& str) {
 	//  return 0 means equal
-	int res = readFileIntoString(path).compare(0, 2, str);
-	printf("compare string %s %s %d\n", readFileIntoString(path).c_str(), str.c_str(), res);
-	return res;
+	return readFileIntoString(path).compare(0, 2, str);
 }
 
 
 void CodeGenC::AddFunction(const PrimFunc& f) {
   // define kernel function once
   string comm_path("/tvm/disk_communicate.log");
+  // TODO don't read file but use static variable to check whether is first
+  // or move to other function
   if (compareStringWithFileContent(comm_path, "no") == 0) {
   	this->stream << readFileIntoString("/tvm/kernel.cu") << "\n";
 	writeStringIntoFile(comm_path, "yes");
