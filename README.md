@@ -51,3 +51,30 @@ We learned a lot from the following projects when building TVM.
   originates from Halide. We also learned and adapted some part of lowering pipeline from Halide.
 - [Loopy](https://github.com/inducer/loopy): use of integer set analysis and its loop transformation primitives.
 - [Theano](https://github.com/Theano/Theano): the design inspiration of symbolic scan operator for recurrence.
+
+
+Installation
+---------------
+
+```bash
+docker run -v $HOME:/mnt --gpus all --rm -t  --name tvm -d tlcpack/ci-gpu:v0.78
+docker start tvm
+docker exec -it  tvm bash
+
+sudo apt-get update
+sudo apt-get install -y python python-dev python-setuptools gcc libtinfo-dev zlib1g-dev build-essential cmake llvm-8 llvm-8-dev llvm-8-runtime vim
+
+git clone --recursive https://github.com/siahuat0727/tvm tvm
+cd tvm
+
+mkdir build && cp cmake/config.cmake build
+
+vim build/config.cmake 
+# Edit config.cmake
+# set(USE_CUDA ON)
+# set(USE_LLVM /usr/lib/llvm-8/bin/llvm-config)
+
+cd build && cmake .. && make -j4 && cd ..
+export TVM_HOME=`pwd`
+export PYTHONPATH=$TVM_HOME/python:${PYTHONPATH}
+```
