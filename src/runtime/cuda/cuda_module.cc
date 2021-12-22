@@ -31,6 +31,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <thread>
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <time.h>
+#include <fstream>
 
 #include "../file_utils.h"
 #include "../meta_data.h"
@@ -41,20 +47,30 @@
 namespace tvm {
 namespace runtime {
 
+class CUDAModuleNode;
+
+void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream);
+
 // Module to support thread-safe multi-GPU execution.
 // cuModule is a per-GPU module
 // The runtime will contain a per-device module table
 // The modules will be lazily loaded
 class CUDAModuleNode : public runtime::ModuleNode {
  public:
+  std::thread t;
+  cudaStream_t my_stream;
   explicit CUDAModuleNode(std::string data, std::string fmt,
                           std::unordered_map<std::string, FunctionInfo> fmap,
                           std::string cuda_source)
       : data_(data), fmt_(fmt), fmap_(fmap), cuda_source_(cuda_source) {
     std::fill(module_.begin(), module_.end(), nullptr);
+    cudaStreamCreate(&my_stream);
   }
   // destructor
   ~CUDAModuleNode() {
+    // TODO check whether can spin forever and force kill the thread here?
+    t.join();
+    cudaStreamDestroy(my_stream);
     for (size_t i = 0; i < module_.size(); ++i) {
       if (module_[i] != nullptr) {
         CUDA_CALL(cudaSetDevice(static_cast<int>(i)));
@@ -95,6 +111,13 @@ class CUDAModuleNode : public runtime::ModuleNode {
       if (fmt_ == "ptx") return data_;
       return "";
     }
+  }
+  
+  void launchLimitSM(int device_id, int max_sm) {
+     t = std::thread(limitSM, this, device_id, max_sm, 16);
+     sleep(4);
+     printf("wake up launch (expected some kernel wake up) %p\n", this);
+
   }
 
   // get a CUfunction from primary context in device_id
@@ -148,12 +171,59 @@ class CUDAModuleNode : public runtime::ModuleNode {
   std::mutex mutex_;
 };
 
+void limitSM(CUDAModuleNode* m_, int device_id, int max_core, int n_stream) {
+    cudaStream_t stream[n_stream];
+    CUresult result;
+    for (int i = 0; i < n_stream; ++i) {
+	cudaStreamCreate(&stream[i]);
+    	CUfunction func = m_->GetFunc(device_id, "sleepKernel");
+	int *ptr_maxcore = &max_core;
+	result = cuLaunchKernel(func, 68, 1, 1, 1, 1, 1, 0, static_cast<CUstream>(stream[i]), (void**)&ptr_maxcore, nullptr);
+	if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
+		std::ostringstream os;
+		const char* msg;
+		cuGetErrorName(result, &msg);
+		os << "CUDALaunch Error: sleepKernel " << msg << "\n"
+			<< ")\n";
+		LOG(FATAL) << os.str();
+	}
+    }
+    for (int i = 0; i < n_stream; ++i) {
+	cudaStreamDestroy(stream[i]);
+    }
+}
+
+using std::string;
+
+string readFileIntoString(const string& path) {
+	std::ifstream input_file(path);
+	if (!input_file.is_open()) {
+		std::cerr << "Could not open the file - '"
+			<< path << "'\n";
+		exit(EXIT_FAILURE);
+	}
+	return string((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+}
+
 // a wrapped function class to get packed func.
 class CUDAWrappedFunc {
  public:
+  mutable bool first_operator;
+  static int is_first_operator_shared;
+  static int count;
+  mutable int id;
+  mutable int operator_count;
+  mutable bool is_unique_wrapper;
+  CUDAWrappedFunc() {
+    first_operator = true;
+  }
+  ~CUDAWrappedFunc() {
+  }
   // initialize the CUDA function.
   void Init(CUDAModuleNode* m, ObjectPtr<Object> sptr, const std::string& func_name,
             size_t num_void_args, const std::vector<std::string>& launch_param_tags) {
+    first_operator = true;
+    operator_count = 0;
     m_ = m;
     sptr_ = sptr;
     func_name_ = func_name;
@@ -163,15 +233,51 @@ class CUDAWrappedFunc {
   // invoke the function with void arguments
   void operator()(TVMArgs args, TVMRetValue* rv, void** void_args) const {
     int device_id;
+
     CUDA_CALL(cudaGetDevice(&device_id));
     if (fcache_[device_id] == nullptr) {
       fcache_[device_id] = m_->GetFunc(device_id, func_name_);
     }
-    CUstream strm = static_cast<CUstream>(CUDAThreadEntry::ThreadLocal()->stream);
+
+    if (first_operator) {
+	id = count;
+	count++;
+        first_operator = false;
+	if (is_first_operator_shared) {
+		is_first_operator_shared = false;
+		is_unique_wrapper = true;
+	} else {
+		is_unique_wrapper = false;
+	}
+    }
+
+    operator_count++;
+    if (is_unique_wrapper && operator_count == 1) {
+	    int max_sm = 0;
+	    std::istringstream is(readFileIntoString("/mnt/tvm-getstarted/sm_cores.txt"));
+	    is >> max_sm;
+	    m_->launchLimitSM(device_id, max_sm);
+    }
+
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
+
+    // clock_t tic = clock();
     CUresult result = cuLaunchKernel(fcache_[device_id], wl.grid_dim(0), wl.grid_dim(1),
                                      wl.grid_dim(2), wl.block_dim(0), wl.block_dim(1),
-                                     wl.block_dim(2), wl.dyn_shmem_size, strm, void_args, nullptr);
+				     wl.block_dim(2), wl.dyn_shmem_size, m_->my_stream, void_args, nullptr);
+
+    // cudaStreamDestroy(strm_);
+    // clock_t toc = clock();
+    // double s = (double)(toc - tic) / CLOCKS_PER_SEC;
+
+    // std::istringstream is2( readFileIntoString("/mnt/tvm-getstarted/last_tune_size.txt") );
+    // int N, L, M;
+    // is2 >> N >> L >> M;
+
+    if (id == count-1) {
+    	cuStreamSynchronize(m_->my_stream);
+    }
+
     if (result != CUDA_SUCCESS && result != CUDA_ERROR_DEINITIALIZED) {
       const char* msg;
       cuGetErrorName(result, &msg);
@@ -189,6 +295,7 @@ class CUDAWrappedFunc {
       }
       LOG(FATAL) << os.str();
     }
+
   }
 
  private:
@@ -204,6 +311,9 @@ class CUDAWrappedFunc {
   // launch parameters configuration
   LaunchParamConfig launch_param_config_;
 };
+
+int CUDAWrappedFunc::is_first_operator_shared = true;
+int CUDAWrappedFunc::count = 0;
 
 class CUDAPrepGlobalBarrier {
  public:

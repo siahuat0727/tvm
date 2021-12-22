@@ -374,7 +374,7 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
     // skip first time call, to activate lazy compilation components.
     pf.CallPacked(args, &temp);
 
-    DeviceAPI::Get(dev)->StreamSync(dev, nullptr);
+    // DeviceAPI::Get(dev)->StreamSync(dev, nullptr);
 
     for (int i = 0; i < repeat; ++i) {
       if (f_preproc != nullptr) {
@@ -388,6 +388,7 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
                                              number * 1.618));  // 1.618 is chosen by random
         }
 
+	printf("start timing...\n");
         Timer t = Timer::Start(dev);
         // start timing
         for (int i = 0; i < number; ++i) {

@@ -32,12 +32,23 @@
 
 #include "cuda_common.h"
 
+#include <iostream>
+// #include <boost/stacktrace.hpp>
+
 namespace tvm {
 namespace runtime {
 
 class CUDADeviceAPI final : public DeviceAPI {
  public:
-  void SetDevice(Device dev) final { CUDA_CALL(cudaSetDevice(dev.device_id)); }
+  bool first_free;
+  CUDADeviceAPI() {
+    first_free = true;
+  }
+  ~CUDADeviceAPI() {
+  }
+  void SetDevice(Device dev) final { 
+    CUDA_CALL(cudaSetDevice(dev.device_id)); 
+  }
   void GetAttr(Device dev, DeviceAttrKind kind, TVMRetValue* rv) final {
     int value = 0;
     switch (kind) {
@@ -126,6 +137,10 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void FreeDataSpace(Device dev, void* ptr) final {
+    if (first_free) {
+	    printf("first free (src/runtime/cuda/cuda_device_api.cc)\n");
+	    first_free = false;
+    }
     if (dev.device_type == kDLCUDAHost) {
       VLOG(1) << "freeing host memory";
       CUDA_CALL(cudaFreeHost(ptr));
@@ -134,6 +149,7 @@ class CUDADeviceAPI final : public DeviceAPI {
       VLOG(1) << "freeing device memory";
       CUDA_CALL(cudaFree(ptr));
     }
+    printf("exit free\n");
   }
 
  protected:
@@ -202,11 +218,14 @@ class CUDADeviceAPI final : public DeviceAPI {
   }
 
   void StreamSync(Device dev, TVMStreamHandle stream) final {
+    // std::cout << boost::stacktrace::stacktrace() << std::endl;
     CUDA_CALL(cudaSetDevice(dev.device_id));
     CUDA_CALL(cudaStreamSynchronize(static_cast<cudaStream_t>(stream)));
   }
 
   void SetStream(Device dev, TVMStreamHandle stream) final {
+    printf("cuda device api SetStream: never reach here?");
+    exit(1);
     CUDAThreadEntry::ThreadLocal()->stream = static_cast<cudaStream_t>(stream);
   }
 
@@ -228,10 +247,18 @@ class CUDADeviceAPI final : public DeviceAPI {
  private:
   static void GPUCopy(const void* from, void* to, size_t size, cudaMemcpyKind kind,
                       cudaStream_t stream) {
+    bool stream_is_null = stream == nullptr;
+    if (stream_is_null) {
+	cudaStreamCreate(&stream);
+	printf("GPU copy, create own stream\n");
+    }
     if (stream != nullptr) {
       CUDA_CALL(cudaMemcpyAsync(to, from, size, kind, stream));
     } else {
       CUDA_CALL(cudaMemcpy(to, from, size, kind));
+    }
+    if (stream_is_null) {
+	cudaStreamDestroy(stream);
     }
   }
 };

@@ -71,7 +71,43 @@ void CodeGenC::ReserveKeywordsAsUnique() {
   GetUniqueName("return");
 }
 
+#include <iostream>
+#include <fstream>
+
+using std::string;
+
+string readFileIntoString(const string& path) {
+	std::ifstream input_file(path);
+	if (!input_file.is_open()) {
+		std::cerr << "Could not open the file - '"
+			<< path << "'\n";
+		exit(EXIT_FAILURE);
+	}
+	return string((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+}
+
+void writeStringIntoFile(const string& path, const string& str) {
+	std::ofstream out(path);
+	out << str;
+	out.close();
+}
+
+int compareStringWithFileContent(const string& path, const string& str) {
+	//  return 0 means equal
+	return readFileIntoString(path).compare(0, 2, str);
+}
+
+
 void CodeGenC::AddFunction(const PrimFunc& f) {
+  // define kernel function once
+  string comm_path("/tvm/disk_communicate.log");
+  // TODO don't read file but use static variable to check whether is first
+  // or move to other function
+  if (compareStringWithFileContent(comm_path, "no") == 0) {
+  	this->stream << readFileIntoString("/tvm/kernel.cu") << "\n";
+	writeStringIntoFile(comm_path, "yes");
+  }
+
   // clear previous generated state.
   this->InitFuncState(f);
   // reserve keywords
@@ -122,6 +158,7 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   this->EndScope(func_scope);
   this->PrintIndent();
   this->stream << "}\n\n";
+  // this->stream << "extern \"C\" __global__ void helloKernel(int k) { printf(\"Hello! My SM ID is %d\\n\", __mysmid()); }\n";
 }
 
 void CodeGenC::PrintFuncPrefix() { stream << "void"; }

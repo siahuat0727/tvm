@@ -43,11 +43,11 @@ namespace runtime {
 class DefaultTimerNode : public TimerNode {
  public:
   virtual void Start() {
-    TVMSynchronize(device_.device_type, device_.device_id, nullptr);
+    // TVMSynchronize(device_.device_type, device_.device_id, nullptr);
     start_ = std::chrono::high_resolution_clock::now();
   }
   virtual void Stop() {
-    TVMSynchronize(device_.device_type, device_.device_id, nullptr);
+    // TVMSynchronize(device_.device_type, device_.device_id, nullptr);
     duration_ = std::chrono::high_resolution_clock::now() - start_;
   }
   virtual int64_t SyncAndGetElapsedNanos() { return duration_.count(); }
